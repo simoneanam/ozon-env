@@ -272,7 +272,7 @@ class OzonEnvBase:
         :param schema: json dict of component with formio schema
         :return: Component record
         """
-        c_model = self.get('component')
+        c_model = await self.get('component')
         model_name = schema.get("rec_name")
         component = await c_model.load({"rec_name": model_name})
         new_component = await c_model.new(data=schema)
@@ -284,8 +284,10 @@ class OzonEnvBase:
             await self.orm.update_model(schema, component)
         return res
 
-    def get(self, model_name) -> OzonModelBase:
-        return self.models.get(model_name)
+    async def get(self, model_name) -> OzonModelBase:
+        if model_name in self.models:
+            return self.models[model_name]
+        return await self.orm._load_model(model_name)
 
     def is_data_value_runtime_only_model(self, model_name: str) -> bool:
         return model_name.lower() in self.data_value_runtime_only_models
@@ -363,9 +365,9 @@ class OzonEnvBase:
         component = await component_model.insert(component)
         if not component.data_model:
             await self.orm.add_model(component.rec_name, virtual=False)
-            return self.get(component.rec_name)
+            return await self.get(component.rec_name)
         else:
-            return self.get(component.data_model)
+            return await self.get(component.data_model)
 
     async def add_model(
         self, model_name, virtual=False, data_model=""
@@ -376,7 +378,7 @@ class OzonEnvBase:
             await self.orm.add_model(
                 model_name, virtual=virtual, data_model=data_model
             )
-        return self.get(model_name)
+        return await self.get(model_name)
 
     async def add_static_model(
         self, model_name: str, model_class: BasicModel, private: bool = False
@@ -614,7 +616,8 @@ class OzonOrm:
                 if await home.exists():
                     await self.import_module_model(db_model)
                     model = self.orm_static_models_map[db_model]
-                    component = await self.env.get("component").load(
+                    component_model = await self.env.get("component")
+                    component = await component_model.load(
                         {
                             '$and': [
                                 {"rec_name": db_model},
@@ -694,9 +697,8 @@ class OzonOrm:
             return False
 
     async def init_session(self, token):
-        self.user_session = await self.env.get("session").load(
-            {"token": token}
-        )
+        session_model = await self.env.get("session")
+        self.user_session = await session_model.load({"token": token})
 
     async def runcmd(self, cmd):
         # for security reason check the command
@@ -910,9 +912,8 @@ class OzonOrm:
         schema = {}
         component = None
         if not virtual:
-            component = await self.env.get("component").load(
-                {"rec_name": model_name}
-            )
+            component_model = await self.env.get("component")
+            component = await component_model.load({"rec_name": model_name})
             if component:
                 schema = component.get_dict_copy()
         if (
