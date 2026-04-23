@@ -539,6 +539,7 @@ class OzonOrm:
             "settings": Settings,
         }
         self.dependencies = {}
+        self.orm_available_models: Dict[str, Path] = {}
         self.db_models = []
         self.orm_sys_models = ["component", "session", "settings"]
         self.private_models = ["settings"]
@@ -744,6 +745,15 @@ class OzonOrm:
         spec.loader.exec_module(module)
         model, parent = _getattribute(module, mclass)
         self.orm_static_models_map[model_name] = model
+
+    async def _load_model(self, model_name: str):
+        if model_name not in self.orm_available_models:
+            return None
+        if model_name not in self.orm_static_models_map:
+            await self.import_module_model(model_name)
+        await self.make_model(model_name)
+        await self.build_reverse_dependencies()
+        return self.env.models.get(model_name)
 
     async def make_local_model(self, mod, version):
         jdata = mod.mm.model.model_json_schema()
