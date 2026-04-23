@@ -543,6 +543,7 @@ class OzonOrm:
         self.dependencies = {}
         self.orm_available_models: Dict[str, Path] = {}
         self._full_it_depends: Dict[str, List[str]] = {}
+        self._models_index: dict = {}
         self.db_models = []
         self.orm_sys_models = ["component", "session", "settings"]
         self.private_models = ["settings"]
@@ -601,7 +602,6 @@ class OzonOrm:
         return reverse_depends
 
     async def init_models(self):
-        # self.models_path = self.config_system.get("models_folder", "/models")
         await self.init_db_models()
         await AsyncPath(self.models_path).mkdir(parents=True, exist_ok=True)
         await AsyncPath(f"{self.models_path}/__init__.py").touch(exist_ok=True)
@@ -610,27 +610,37 @@ class OzonOrm:
             if main_model not in self.env.models:
                 await self.make_model(main_model)
 
+        await self._load_models_index()
+
         component_model = await self.env.get("component")
         for db_model in self.db_models:
             self.dependencies[db_model] = []
             if db_model in self.env.models:
                 continue
-            home = AsyncPath(f"{self.models_path}/{db_model}.py")
+            py_path = f"{self.models_path}/{db_model}.py"
+            home = AsyncPath(py_path)
             if await home.exists():
-                await self.import_module_model(db_model)
-                static_cls = self.orm_static_models_map[db_model]
-                component = await component_model.load(
-                    {
-                        '$and': [
-                            {"rec_name": db_model},
-                            {
-                                'update_datetime': {
-                                    '$gt': static_cls.get_version()
-                                }
-                            },
-                        ]
-                    }
-                )
+                # Version check via index (no import). Fall back to AST for migration.
+                index_entry = self._models_index.get(db_model)
+                if index_entry is None:
+                    meta = self._parse_model_metadata_from_file(py_path)
+                    if meta.get("version"):
+                        await self._update_index_entry(db_model, meta)
+                        index_entry = meta
+                version = (index_entry or {}).get("version", "")
+                if version:
+                    component = await component_model.load(
+                        {
+                            '$and': [
+                                {"rec_name": db_model},
+                                {'update_datetime': {'$gt': version}},
+                            ]
+                        }
+                    )
+                else:
+                    component = await component_model.load(
+                        {"rec_name": db_model}
+                    )
                 if component:
                     await self._regenerate_model_file(
                         component.get_dict_copy(), component
@@ -639,14 +649,11 @@ class OzonOrm:
                 component = await component_model.load({"rec_name": db_model})
                 if component:
                     schema = component.get_dict_copy()
-                    if not exists(f"{self.models_path}/{db_model}.py"):
+                    if not exists(py_path):
                         await self.init_model_and_write_code(
                             db_model, "", False, schema, component
                         )
-                    await self.import_module_model(db_model)
-            self.orm_available_models[db_model] = Path(
-                f"{self.models_path}/{db_model}.py"
-            )
+            self.orm_available_models[db_model] = Path(py_path)
         await self._build_full_it_depends()
 
     async def get_collections_names(self, query={}):
@@ -755,8 +762,61 @@ class OzonOrm:
         model, parent = _getattribute(module, mclass)
         self.orm_static_models_map[model_name] = model
 
+    def _index_path(self) -> str:
+        return f"{self.models_path}/models_index.json"
+
+    @staticmethod
+    def _parse_model_metadata_from_file(file_path: str) -> dict:
+        """Extract model_depends, data_model, version from .py using AST — no import."""
+        import ast
+
+        result = {"model_depends": [], "data_model": "", "version": ""}
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+        except Exception:
+            return result
+        targets = {"get_version", "model_depends", "get_data_model"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in targets:
+                for stmt in node.body:
+                    if isinstance(stmt, ast.Return):
+                        try:
+                            value = ast.literal_eval(stmt.value)
+                            if node.name == "get_version":
+                                result["version"] = value or ""
+                            elif node.name == "model_depends":
+                                result["model_depends"] = (
+                                    value if isinstance(value, list) else []
+                                )
+                            elif node.name == "get_data_model":
+                                result["data_model"] = value or ""
+                        except Exception:
+                            pass
+        return result
+
+    async def _load_models_index(self):
+        """Load models_index.json from disk."""
+        try:
+            async with aiofiles.open(
+                self._index_path(), "r", encoding="utf-8"
+            ) as f:
+                self._models_index = json.loads(await f.read())
+        except Exception:
+            self._models_index = {}
+
+    async def _update_index_entry(self, model_name: str, meta: dict):
+        """Write/update a single entry in models_index.json."""
+        self._models_index[model_name] = meta
+        async with aiofiles.open(
+            self._index_path(), "w", encoding="utf-8"
+        ) as f:
+            await f.write(
+                json.dumps(self._models_index, ensure_ascii=False, indent=2)
+            )
+
     async def _build_full_it_depends(self):
-        """Pre-compute full reverse dependency graph from all imported static classes."""
+        """Pre-compute full reverse dependency graph from the models index (no imports)."""
 
         class _Proxy:
             def __init__(self, data_model):
@@ -765,24 +825,15 @@ class OzonOrm:
         proxy_models = {}
         direct_reverse = {}
 
-        for name, cls in self.orm_static_models_map.items():
-            deps = []
-            if hasattr(cls, "model_depends"):
-                try:
-                    deps = cls.model_depends() or []
-                except Exception:
-                    deps = []
+        # Dynamic models: read from lightweight index (no module imports)
+        for name, meta in self._models_index.items():
+            deps = meta.get("model_depends", []) or []
             for dep in deps:
                 if name not in direct_reverse.setdefault(dep, []):
                     direct_reverse[dep].append(name)
-            dm = ""
-            if hasattr(cls, "get_data_model"):
-                try:
-                    dm = cls.get_data_model() or ""
-                except Exception:
-                    dm = ""
-            proxy_models[name] = _Proxy(dm)
+            proxy_models[name] = _Proxy(meta.get("data_model", "") or "")
 
+        # Core / local static models: read from already-loaded OzonModel instances
         for name, model in self.env.models.items():
             if name not in proxy_models:
                 for dep in getattr(model, "depends", []):
@@ -819,7 +870,7 @@ class OzonOrm:
         await self.init_model_and_write_code(
             model_name, "", False, schema, component
         )
-        await self.import_module_model(model_name)
+        # import happens lazily in _load_model; index is updated by make_local_model
 
     async def make_local_model(self, mod, version):
         jdata = mod.mm.model.model_json_schema()
@@ -955,6 +1006,15 @@ class OzonOrm:
             f"{self.models_path}/{mod.name}.py", "a+", encoding="utf-8"
         ) as mod_file:
             await mod_file.write(tmp)
+
+        await self._update_index_entry(
+            mod.name,
+            {
+                "version": version,
+                "model_depends": mod.mm.model_depends,
+                "data_model": mod.mm.data_model,
+            },
+        )
 
     async def init_model_and_write_code(
         self, model_name, data_model, virtual, schema, component
