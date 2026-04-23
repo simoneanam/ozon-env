@@ -609,37 +609,45 @@ class OzonOrm:
             if main_model not in self.env.models:
                 await self.make_model(main_model)
 
+        component_model = await self.env.get("component")
         for db_model in self.db_models:
             self.dependencies[db_model] = []
-            if db_model not in list(self.env.models.keys()):
-                home = AsyncPath(f"{self.models_path}/{db_model}.py")
-                if await home.exists():
-                    await self.import_module_model(db_model)
-                    model = self.orm_static_models_map[db_model]
-                    component_model = await self.env.get("component")
-                    component = await component_model.load(
-                        {
-                            '$and': [
-                                {"rec_name": db_model},
-                                {
-                                    'update_datetime': {
-                                        '$gt': model.get_version()
-                                    }
-                                },
-                            ]
-                        }
+            if db_model in self.env.models:
+                continue
+            home = AsyncPath(f"{self.models_path}/{db_model}.py")
+            if await home.exists():
+                await self.import_module_model(db_model)
+                static_cls = self.orm_static_models_map[db_model]
+                component = await component_model.load(
+                    {
+                        '$and': [
+                            {"rec_name": db_model},
+                            {
+                                'update_datetime': {
+                                    '$gt': static_cls.get_version()
+                                }
+                            },
+                        ]
+                    }
+                )
+                if component:
+                    await self._regenerate_model_file(
+                        component.get_dict_copy(), component
                     )
-                    if component:
-                        await self.update_model(
-                            component.get_dict_copy(), component
+            else:
+                component = await component_model.load(
+                    {"rec_name": db_model}
+                )
+                if component:
+                    schema = component.get_dict_copy()
+                    if not exists(f"{self.models_path}/{db_model}.py"):
+                        await self.init_model_and_write_code(
+                            db_model, "", False, schema, component
                         )
-                    else:
-                        await self.make_model(db_model)
-                else:
-                    await self.add_model(db_model)
-        for neme, model in self.orm_static_models_map.items():
-            if neme not in self.env.models:
-                await self.make_model(neme)
+                    await self.import_module_model(db_model)
+            self.orm_available_models[db_model] = Path(
+                f"{self.models_path}/{db_model}.py"
+            )
         await self.build_reverse_dependencies()
 
     async def get_collections_names(self, query={}):
@@ -756,6 +764,13 @@ class OzonOrm:
         await self.make_model(model_name)
         await self.build_reverse_dependencies()
         return self.env.models.get(model_name)
+
+    async def _regenerate_model_file(self, schema: dict, component):
+        model_name = schema.get("rec_name")
+        if model_name in self.orm_static_models_map:
+            self.orm_static_models_map.pop(model_name)
+        await self.init_model_and_write_code(model_name, "", False, schema, component)
+        await self.import_module_model(model_name)
 
     async def make_local_model(self, mod, version):
         jdata = mod.mm.model.model_json_schema()
