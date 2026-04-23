@@ -74,7 +74,7 @@ class DataValueService:
             sort = props.get("sort", f"{field}:asc")
             limit = int(props.get("limit", "0"))
             skip = int(props.get("skip", "0"))
-            model = self.orm.env.models.get(modelname)
+            model = await self.orm.env.get(modelname)
             query = {
                 "$and": [
                     model.default_domain.copy(),

@@ -542,6 +542,7 @@ class OzonOrm:
         }
         self.dependencies = {}
         self.orm_available_models: Dict[str, Path] = {}
+        self._full_it_depends: Dict[str, List[str]] = {}
         self.db_models = []
         self.orm_sys_models = ["component", "session", "settings"]
         self.private_models = ["settings"]
@@ -635,9 +636,7 @@ class OzonOrm:
                         component.get_dict_copy(), component
                     )
             else:
-                component = await component_model.load(
-                    {"rec_name": db_model}
-                )
+                component = await component_model.load({"rec_name": db_model})
                 if component:
                     schema = component.get_dict_copy()
                     if not exists(f"{self.models_path}/{db_model}.py"):
@@ -648,7 +647,7 @@ class OzonOrm:
             self.orm_available_models[db_model] = Path(
                 f"{self.models_path}/{db_model}.py"
             )
-        await self.build_reverse_dependencies()
+        await self._build_full_it_depends()
 
     async def get_collections_names(self, query={}):
         if not query:
@@ -756,20 +755,70 @@ class OzonOrm:
         model, parent = _getattribute(module, mclass)
         self.orm_static_models_map[model_name] = model
 
+    async def _build_full_it_depends(self):
+        """Pre-compute full reverse dependency graph from all imported static classes."""
+
+        class _Proxy:
+            def __init__(self, data_model):
+                self.data_model = data_model
+
+        proxy_models = {}
+        direct_reverse = {}
+
+        for name, cls in self.orm_static_models_map.items():
+            deps = []
+            if hasattr(cls, "model_depends"):
+                try:
+                    deps = cls.model_depends() or []
+                except Exception:
+                    deps = []
+            for dep in deps:
+                if name not in direct_reverse.setdefault(dep, []):
+                    direct_reverse[dep].append(name)
+            dm = ""
+            if hasattr(cls, "get_data_model"):
+                try:
+                    dm = cls.get_data_model() or ""
+                except Exception:
+                    dm = ""
+            proxy_models[name] = _Proxy(dm)
+
+        for name, model in self.env.models.items():
+            if name not in proxy_models:
+                for dep in getattr(model, "depends", []):
+                    if name not in direct_reverse.setdefault(dep, []):
+                        direct_reverse[dep].append(name)
+                proxy_models[name] = _Proxy(getattr(model, "data_model", ""))
+
+        for k in direct_reverse:
+            direct_reverse[k] = sorted(direct_reverse[k])
+
+        propagate_data_model_dependencies(direct_reverse, proxy_models)
+        self._full_it_depends = direct_reverse
+
+        for name, model in self.env.models.items():
+            if name in self._full_it_depends:
+                model.it_depends = self._full_it_depends[name]
+
     async def _load_model(self, model_name: str):
         if model_name not in self.orm_available_models:
             return None
         if model_name not in self.orm_static_models_map:
             await self.import_module_model(model_name)
         await self.make_model(model_name)
-        await self.build_reverse_dependencies()
-        return self.env.models.get(model_name)
+        loaded = self.env.models[model_name]
+        loaded.it_depends = self._full_it_depends.get(model_name, [])
+        if self.env.get_local_transaction():
+            loaded._transaction = True
+        return loaded
 
     async def _regenerate_model_file(self, schema: dict, component):
         model_name = schema.get("rec_name")
         if model_name in self.orm_static_models_map:
             self.orm_static_models_map.pop(model_name)
-        await self.init_model_and_write_code(model_name, "", False, schema, component)
+        await self.init_model_and_write_code(
+            model_name, "", False, schema, component
+        )
         await self.import_module_model(model_name)
 
     async def make_local_model(self, mod, version):
