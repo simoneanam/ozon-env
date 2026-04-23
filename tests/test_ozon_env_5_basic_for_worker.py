@@ -18,8 +18,8 @@ class MockWorker1(OzonWorkerEnv):
             return self.exception_response(err=res.msg)
 
         data = await get_file_data()
-        self.p_model:OzonModel  = self.get(self.params.get("model"))
-        self.row_model:OzonModel = self.get("riga_doc")
+        self.p_model:OzonModel  = await self.get(self.params.get("model"))
+        self.row_model:OzonModel = await self.get("riga_doc")
 
         assert self.p_model.it_depends == ['riga_doc']
         assert self.p_model.name == "documento_beni_servizi"

@@ -12,7 +12,7 @@ async def test_stream_and_find_large_dataset():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
 
-    model = env.get("test_form_1")
+    model = await env.get("test_form_1")
 
     # -----------------------------
     # Insert 200 records
@@ -73,7 +73,7 @@ async def test_search_distinct():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
 
-    model = env.get("test_form_1")
+    model = await env.get("test_form_1")
 
     records = await model.search_all_distinct("firstName",{})
 
@@ -89,7 +89,7 @@ async def test_stream_memory_stable():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
 
-    model = env.get("test_form_1")
+    model = await env.get("test_form_1")
 
     for i in range(500):
         rec = await model.new({
@@ -119,7 +119,7 @@ async def test_obfuscate_multiple_fields():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
 
-    model = env.get("test_form_1")
+    model = await env.get("test_form_1")
 
     unique_name = f"Mario_{uuid.uuid4().hex}"
 
@@ -189,7 +189,7 @@ async def test_stream_obfuscate_fields():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
 
-    model = env.get("test_form_1")
+    model = await env.get("test_form_1")
 
     unique_name = f"Mario_{uuid.uuid4().hex}"
 

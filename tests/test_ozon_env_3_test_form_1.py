@@ -87,7 +87,7 @@ async def test_component_test_form_1_init():
     assert component.update_datetime == BasicModel.default_datetime()
     assert len(component.get('components')) == 10
     assert (
-        env.get('test_form_1').schema.get("components")[0].get("key")
+        (await env.get('test_form_1')).schema.get("components")[0].get("key")
         == "columns"
     )
     await env.close_db()
@@ -98,7 +98,7 @@ async def test_component_test_form_0_1_init_ok():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    test_form_1_model = env.get('test_form_1')
+    test_form_1_model = await env.get('test_form_1')
     # Testa l'inserimento tramite metodo insert
     test_form_1_in = await test_form_1_model.new(
         {
@@ -144,7 +144,7 @@ async def test_component_test_form_1_raw_update():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    old_test_form_1_model = env.get('test_form_1')
+    old_test_form_1_model = await env.get('test_form_1')
     old_test_form_1 = await old_test_form_1_model.new()
     assert len(old_test_form_1_model.form_fields) == 22
     assert len(old_test_form_1_model.table_columns.keys()) == 7
@@ -152,15 +152,16 @@ async def test_component_test_form_1_raw_update():
     assert hasattr(old_test_form_1, "content") is False
     assert hasattr(old_test_form_1, "content1") is True
     data = await readfilejson('data', 'test_form_1.1_formio_schema.json')
-    component = await env.get('component').new(data=data)
+    component_model = await env.get('component')
+    component = await component_model.new(data=data)
     assert component.owner_uid == "admin"
-    component = await env.get('component').update(component)
+    component = await component_model.update(component)
     assert component.rec_name == "test_form_1"
     assert not component.update_datetime == BasicModel.default_datetime()
     assert len(component.get('components')) == 11
     data = await readfilejson('data', 'test_form_1.0_formio_schema.json')
-    component = await env.get('component').new(data=data)
-    await env.get('component').upsert(component)
+    component = await component_model.new(data=data)
+    await component_model.upsert(component)
     await env.close_env()
 
 
@@ -171,7 +172,7 @@ async def test_component_test_form_1_update():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    old_test_form_1_model = env.get('test_form_1')
+    old_test_form_1_model = await env.get('test_form_1')
     old_test_form_1 = await old_test_form_1_model.new()
     assert hasattr(old_test_form_1, "uploadBase64") is False
     assert hasattr(old_test_form_1, "content") is False
@@ -181,7 +182,7 @@ async def test_component_test_form_1_update():
     assert component.owner_uid == "admin"
     assert component.rec_name == "test_form_1"
     assert len(component.get('components')) == 13
-    test_form_1_model = env.get('test_form_1')
+    test_form_1_model = await env.get('test_form_1')
     test_form_1 = await test_form_1_model.new({})
     assert hasattr(test_form_1, "uploadBase64") is True
     assert hasattr(test_form_1, "content") is True
@@ -197,7 +198,7 @@ async def test_component_test_form_1_load():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    component = await env.get('component').load({"rec_name": 'test_form_1'})
+    component = await (await env.get('component')).load({"rec_name": 'test_form_1'})
     assert component.owner_uid == "admin"
     assert len(component.components) == 13
     assert component.get(f'components.{3}.label') == "Panel"
@@ -215,7 +216,7 @@ async def test_test_form_1_public_init_data_err():
     assert env.user_session.uid == "public"
     assert env.user_session.is_public is True
     assert env.orm.user_session.is_public is True
-    settings = env.get('settings')
+    settings = await env.get('settings')
     with pytest.raises(SessionException) as excinfo:
         await settings.find({})
     assert 'Permission Denied' in str(excinfo)
@@ -230,9 +231,7 @@ async def test_test_form_1_init_data():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    # model is in env.models
-
-    test_form_1_model = env.get('test_form_1')
+    test_form_1_model = await env.get('test_form_1')
     assert test_form_1_model.model.get_unique_fields() == [
         "rec_name",
         "firstName",
@@ -259,9 +258,8 @@ async def test_test_form_1_insert_ok():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    # model exist in env models
-    assert 'test_form_1' in list(env.models.keys())
-    test_form_1_model = env.get('test_form_1')
+    assert 'test_form_1' in env.orm.orm_available_models
+    test_form_1_model = await env.get('test_form_1')
     test_form_1 = await test_form_1_model.new(data=data)
 
     assert test_form_1.is_error() is False
@@ -291,9 +289,8 @@ async def test_test_form_1_insert_ko():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    # model is in env.models
-    assert 'test_form_1' in list(env.models.keys())
-    test_form_1_model = env.get('test_form_1')
+    assert 'test_form_1' in env.orm.orm_available_models
+    test_form_1_model = await env.get('test_form_1')
     test_form_1 = await test_form_1_model.new(data=data)
     test_form_1_new = await test_form_1_model.insert(test_form_1)
     assert test_form_1_new is None

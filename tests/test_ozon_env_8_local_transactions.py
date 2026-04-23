@@ -11,7 +11,7 @@ async def test_local_transaction():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
     env.local_transaction_start()
-    test_form_1_model = env.get('test_form_1')
+    test_form_1_model = await env.get('test_form_1')
 
     # test rollback insert
     forms = await test_form_1_model.find({})

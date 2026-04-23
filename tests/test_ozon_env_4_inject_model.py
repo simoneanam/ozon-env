@@ -16,7 +16,7 @@ async def test_add_user_static_model():
     await env.session_app()
     user_model = await env.add_static_model('u SEr', User, True)
     assert user_model.name == "user"
-    ret_model = env.get('user')
+    ret_model = await env.get('user')
     assert ret_model.name == "user"
     assert ret_model.static is User
     assert ['rec_name', 'uid'] == User.get_unique_fields()
@@ -53,7 +53,7 @@ async def test_user_static_model_add_data():
         local_model={"user": User}, local_model_private=["user"]
     )
     await env.orm.init_session("BA6BA930")
-    user_model = env.get('user')
+    user_model = await env.get('user')
     assert user_model.name == "user"
     assert user_model.static == User
     user = await user_model.new(data[0])
@@ -76,7 +76,7 @@ async def test_user_find_fields():
     await env.init_env(local_model={'user': User})
     await env.orm.init_session("BA6BA930")
     env.orm.add_private_model("user")
-    user_model = env.get('user')
+    user_model = await env.get('user')
     users = await user_model.find_raw(
         {'uid': 'admin'},
         fields={"rec_name": True, "full_name": True, "_id": False},
@@ -160,7 +160,7 @@ async def test_add_component_resource_1_product_raw_query():
     await env.orm.add_static_model('user', User)
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    product_model = env.get('prodotti')
+    product_model = await env.get('prodotti')
     products = await product_model.find_raw(
         product_model.get_domain(), sort="list_order:asc"
     )
@@ -181,7 +181,7 @@ async def test_aggregation_with_product1():
     await env.orm.add_static_model('user', User)
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    product_model = env.get('prodotti')
+    product_model = await env.get('prodotti')
     products = await product_model.find(
         product_model.get_domain(), sort="label:asc"
     )
@@ -242,7 +242,7 @@ async def test_aggregation_with_product2():
     await env.orm.add_static_model('user', User)
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    product_model = env.get('prodotti')
+    product_model = await env.get('prodotti')
     pipeline_items = [
         {"$match": product_model.get_domain()},
         {
@@ -285,7 +285,7 @@ async def test_products_distinct_name():
     await env.orm.add_static_model('user', User)
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    product_model = env.get('prodotti')
+    product_model = await env.get('prodotti')
     products = await product_model.distinct(
         "rec_name", product_model.get_domain()
     )
@@ -300,7 +300,7 @@ async def test_set_to_delete_product():
     await env.orm.add_static_model('user', User)
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    product_model = env.get('prodotti')
+    product_model = await env.get('prodotti')
     pipeline_items = [
         {"$match": product_model.get_domain()},
         {
@@ -377,7 +377,7 @@ async def test_model_hinerithances_doc():
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
     await ini_data_doc(env.db)
-    docbn_model = env.get('documento_beni_servizi')
+    docbn_model = await env.get('documento_beni_servizi')
     doc: CoreModel = await docbn_model.load({"idDg": "99999"})
     assert doc.annoRif == 2022
     await docbn_model.remove(doc)

@@ -10,7 +10,7 @@ async def test_riga_doc_select_model_distinct():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    riga_doc_model = env.get('riga_doc')
+    riga_doc_model = await env.get('riga_doc')
 
     record = await riga_doc_model.new({
         "parent": "DOC99999"
@@ -38,7 +38,7 @@ async def test_riga_doc_select_url():
     await env.init_env()
     env.params = {"current_session_token": "BA6BA930"}
     await env.session_app()
-    test_form_1_model = env.get('test_form_1')
+    test_form_1_model = await env.get('test_form_1')
 
     record = await test_form_1_model.new({
         "post_id": "3"
